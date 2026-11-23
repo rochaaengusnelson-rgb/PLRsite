@@ -16,10 +16,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  deploy:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+  # Build: package the site once. Re-running only the deploy job reuses this
+  # single bundle, so a re-run can never see two "github-pages" artifacts.
+  build:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -30,6 +29,24 @@ jobs:
         uses: actions/upload-pages-artifact@v4
         with:
           path: .
+
+  # Deploy: runs as its own job after the bundle is finalized. If GitHub
+  # briefly reports the bundle as missing, wait and try once more.
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url || steps.deployment_retry.outputs.page_url }}
+    steps:
       - name: Deploy to GitHub Pages
         id: deployment
+        continue-on-error: true
+        uses: actions/deploy-pages@v4
+      - name: Wait before retrying
+        if: steps.deployment.outcome == 'failure'
+        run: sleep 30
+      - name: Deploy to GitHub Pages (retry)
+        id: deployment_retry
+        if: steps.deployment.outcome == 'failure'
         uses: actions/deploy-pages@v4
